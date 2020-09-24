@@ -3,7 +3,7 @@ from numpy import sqrt
 from numpy.fft import fft2, fftshift
 import matplotlib.pyplot as plt
 from scipy.ndimage.interpolation import shift
-import MegaScreen
+import MegaScreen #!pip install MegaScreen
 import functools
 import sys
 
