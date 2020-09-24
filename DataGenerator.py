@@ -1,8 +1,11 @@
 import numpy as np
 from numpy import sqrt
+from numpy.fft import fft2, fftshift
+import matplotlib.pyplot as plt
+from scipy.ndimage.interpolation import shift
+import MegaScreen
 import functools
 import sys
-
 
 def NumZernike(m):
     """Return the number of polynomials up to and including radial order m"""
@@ -101,9 +104,6 @@ def Orthoganalise(Zernikes):
     zernikeNorm = r[0,0]
     orthoZernikes *= zernikeNorm
     return orthoZernikes
-    
-import MegaScreen
-from numpy.fft import fft2, fftshift
 
 def Phase_screen_generator(
     diameter, L0, maxRadial,r0,zernikeGrids):
@@ -162,9 +162,6 @@ def speckle_image(screen, mask, output_diameter, oversample):
     '''In real algorithm need to normalise image using a threshold?'''
     return image
 
-import matplotlib.pyplot as plt
-from scipy.ndimage.interpolation import shift
-
 def centroid_position(SpeckleScreen):
     '''Returns the location of the image (COM) centroid for a 
        given SpeckleScreen, if normalise = True returns absolute 
@@ -198,10 +195,11 @@ def pre_process2(SpeckleScreen, output_diameter):
     return SpeckleScreen    
 
 
-def downsampler(SpeckleScreen,k_size,batch_size):
+def downsampler(SpeckleScreen,k_size,batch_size=None):
     image_diameter = np.alen(SpeckleScreen[0,:,0])
     down_diameter = int(image_diameter/k_size)
-
+    if batch_size == None:
+      batch_size = len(SpeckleScreen)//5
     def downsample_batch(SpeckleScreen_d,k_size):
         '''downsamples a batch of images by summing over a k_size*k_size square kernel
         (Vectorised)'''
@@ -214,7 +212,7 @@ def downsampler(SpeckleScreen,k_size,batch_size):
     for i in range(int(len(SpeckleScreen)/batch_size)):
         SpeckleScreen_d = SpeckleScreen[i*batch_size:(i+1)*batch_size,0:image_diameter,0:image_diameter]
         SpeckleScreen_final[i*batch_size:(i+1)*batch_size,0:down_diameter,0:down_diameter] = downsample_batch(SpeckleScreen_d,k_size)
-        print('downsampled',batch_size*(i+1),'images')
+        #print('downsampled',batch_size*(i+1),'images')
     return SpeckleScreen_final/(k_size*k_size)
 
 def downsample(SpeckleScreen,k_size):
@@ -263,13 +261,28 @@ def crop(SpeckleScreen, output_diameter):
     SpeckleScreen = SpeckleScreen[min_w:max_w,min_w:max_w]
     return SpeckleScreen    
 
+def cropbatch(SpeckleScreen, output_diameter):
+    width = len(SpeckleScreen[0,:,0])
+    min_w = int((width-output_diameter)/2)
+    max_w = int(width-min_w)
+    SpeckleScreen = SpeckleScreen[:,min_w:max_w,min_w:max_w]
+    return SpeckleScreen    
+
+
 def normalise_centroid(diameter,oversample):
     '''Use to determine the normalisation parameter for 
        centroid_position to predict G-tilts'''
     zernike_test = ZernikeGrid(gridSize=diameter, maxRadial=1,orthoganalise=True)
     Phasescreen_test = zernike_test[0]*zernike_test[2]
+
     plt.figure(figsize=(7,7))
     plt.imshow(Phasescreen_test)
+    plt.colorbar()
+    plt.show()
+
+
+    plt.figure(figsize=(7,7))
+    plt.imshow(zernike_test[0]*zernike_test[1])
     plt.colorbar()
     plt.show()
 
@@ -282,9 +295,12 @@ def normalise_centroid(diameter,oversample):
     normalisation = centroid_position(SpeckleScreen_test)
     print('y error is', normalisation[1])
     normalisation = normalisation[0]
+    print('normalisation factor is', normalisation)
     return normalisation  
 
 class generate:
+  '''Generate class outlines how to make one data sample. Creates a random phasescreen, 
+     fourier transforms into diffraction plane, and computes the tip/tilt zernike polynomials.'''
   def __init__(self,L0,r0,diameter,oversample,zernikeGrids):
       Zernikes, phasescreen  = Phase_screen_generator(diameter,L0, 1,r0,zernikeGrids)
       self.Zs = Zernikes[0,1:3]
@@ -305,3 +321,52 @@ class generate:
   
   def normalise(self):
       self.screen = (self.screen-np.abs(self.screen).min())*1/(np.abs(self.screen).max()-np.abs(self.screen).min())
+    
+
+'''Generate zernike screens once for runtime'''
+zernikegrids = ZernikeGrid(diameter,maxRadial=1,diameter=None,orthoganalise=True)
+zernikegrids[2,:,:] = -zernikegrids[2,:,:]
+ 
+    
+
+'''Example File Creation/Output:'''
+    
+from astropy.io import fits
+
+def generate_batch(n,L0,r0,diameter,oversample,output_diameter):
+    #Generate a batch of specklescreens, Zs, Gs
+    specklescreens = np.zeros((n,output_diameter,output_diameter))
+    Zs = np.zeros((n,2))
+    Gs = np.zeros((n,2))
+
+    for i in range(n):
+        speckle = generate(L0,r0,diameter,oversample,zernikegrids)
+        speckle.centroid()
+        speckle.downsample(2)
+        Gs[i,:] = speckle.Gs
+        speckle.crop(output_diameter)
+        specklescreens[i,:,:] = speckle.screen
+        Zs[i,:] = speckle.Zs
+        if not i%50:
+            print('step:',i)
+    return specklescreens, Zs, Gs
+
+def FITSsave(image,path):
+    hdul = fits.HDUList()
+    hdul.append(fits.PrimaryHDU())
+    hdul.append(fits.ImageHDU(data=image))
+    hdul.writeto(path) 
+
+    
+for i in range(batches):
+    specklescreens, Zs, Gs = generate_batch(n,L0,r0,diameter,oversample,output_diameter)
+    print("batch",i+1,"complete")
+
+    path1 = '/content1/specklescreens{0}.fits'.format(i)
+    FITSsave(specklescreens,path1)
+
+    path2 = '/content2/Zs{0}.fits'.format(i)
+    FITSsave(Zs,path2)
+
+    path3 = '/content3/Gs{0}.fits'.format(i)
+    FITSsave(Gs,path3)
