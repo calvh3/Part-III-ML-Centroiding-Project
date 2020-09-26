@@ -330,6 +330,17 @@ zernikegrids[2,:,:] = -zernikegrids[2,:,:]
     
 
 '''Example File Creation/Output:'''
+
+
+n= 10000 #number of images per saved file
+batches = 10 #number of saved files
+diameter = 128 #sampling (pixels) of the phase screen
+oversample = 8 #Times oversampled into FFT plane (plane size is (diameter*oversample)^2)
+#Note: for perfect nyquist sampling require the FFT to be twice as long as the input, ie oversanple=2
+L0 = 10000 #outer turbulence size
+r0 = diameter/5 #Fried parameter
+output_diameter = 64 #Output crop size
+
     
 from astropy.io import fits
 
